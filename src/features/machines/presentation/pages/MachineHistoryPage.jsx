@@ -357,15 +357,22 @@ export default function MachineHistoryPage() {
   }, [machines]);
 
   useEffect(() => {
-    if (!router.query.machine || !machines.length) return;
-    const selectedMachine = machines.find((machine) => String(machine.id) === String(router.query.machine));
+    if (!machines.length) return;
+    const requestedMachine = router.query.machine
+      ? machines.find((machine) => String(machine.id) === String(router.query.machine))
+      : null;
+    const requestedPointOwner = router.query.point
+      ? machines.find((machine) => (machine.puntos_muestreo || []).some((point) => String(point.id) === String(router.query.point)))
+      : null;
+    const selectedMachine = requestedMachine || requestedPointOwner;
     if (!selectedMachine) return;
+
     const companyId = selectedMachine.empresa || selectedMachine.empresa_info?.id;
     if (companyId) setCompanyFilter(String(companyId));
     setMachineFilter(String(selectedMachine.id));
     if (router.query.point) setPointFilter(String(router.query.point));
     if (router.query.test) setTestFilter(String(router.query.test));
-  }, [router.query.machine, machines]);
+  }, [router.query.machine, router.query.point, router.query.test, machines]);
 
   const machineOptions = useMemo(() => machines
     .filter((machine) => !companyFilter || String(machine.empresa || machine.empresa_info?.id) === String(companyFilter))
@@ -379,23 +386,30 @@ export default function MachineHistoryPage() {
     machineFilter ? rows.filter((row) => row.machineId === machineFilter) : []
   ), [rows, machineFilter]);
 
-  const pointOptions = useMemo(() => {
-    const points = new Map();
-    const selectedMachine = machines.find((machine) => String(machine.id) === String(machineFilter));
-    (selectedMachine?.puntos_muestreo || []).forEach((point) => {
-      points.set(String(point.id), { name: point.nombre, code: point.codigo });
-    });
-    machineRows.forEach((row) => {
-      if (row.pointId) points.set(row.pointId, {
-        name: row.pointName,
-        code: row.pointCode,
-      });
-    });
-    return Array.from(points.entries()).map(([id, point]) => ({
-      id,
-      label: point.code ? `${point.name} · ${point.code}` : point.name,
-    }));
-  }, [machines, machineFilter, machineRows]);
+  const pointOptions = useMemo(() => machines
+    .filter((machine) => !companyFilter || String(machine.empresa || machine.empresa_info?.id) === String(companyFilter))
+    .flatMap((machine) => (machine.puntos_muestreo || []).map((point) => ({
+      id: String(point.id),
+      machineId: String(machine.id),
+      companyId: String(machine.empresa || machine.empresa_info?.id || ''),
+      label: `${point.nombre || 'Punto sin nombre'}${point.codigo ? ` · ${point.codigo}` : ''}`,
+      machineLabel: machine.nombre || machine.codigo_equipo || `Máquina ${machine.id}`,
+    })))
+    .sort((left, right) => left.label.localeCompare(right.label)), [machines, companyFilter]);
+
+  const selectedPoint = pointOptions.find((point) => point.id === pointFilter);
+
+  const selectPoint = (pointId) => {
+    setPointFilter(pointId);
+    setTestFilter('');
+    setSearch('');
+    if (!pointId) return;
+
+    const point = pointOptions.find((item) => item.id === pointId);
+    if (!point) return;
+    setMachineFilter(point.machineId);
+    if (point.companyId) setCompanyFilter(point.companyId);
+  };
 
   const testOptions = useMemo(() => {
     const map = new Map();
@@ -405,7 +419,7 @@ export default function MachineHistoryPage() {
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!companyFilter || !machineFilter) return [];
+    if (!machineFilter) return [];
     return machineRows.filter((row) => {
       if (!term) return true;
       return [row.machineName, row.pointName, row.pointCode, row.sampleId, row.testName, row.value, row.status]
@@ -414,10 +428,10 @@ export default function MachineHistoryPage() {
         .toLowerCase()
         .includes(term);
     }).sort(compareHistoryRows);
-  }, [companyFilter, machineFilter, machineRows, pointFilter, testFilter, search]);
+  }, [machineFilter, machineRows, pointFilter, testFilter, search]);
 
   const selectedMachine = machines.find((machine) => String(machine.id) === String(machineFilter));
-  const canShowHistory = Boolean(companyFilter && machineFilter);
+  const canShowHistory = Boolean(machineFilter);
   const trendSeries = useMemo(() => buildSeries(filteredRows), [filteredRows]);
 
   return (
@@ -444,7 +458,7 @@ export default function MachineHistoryPage() {
         <div className="filtersHeading">
           <div>
             <span>Explorar histórico</span>
-            <p>Seleccione el equipo y refine las series que desea comparar.</p>
+            <p>Busque un punto de medición o seleccione un equipo para comparar sus series.</p>
           </div>
           {machineFilter ? <button type="button" className="clearFilters" onClick={clearFilters}>Limpiar filtros</button> : null}
         </div>
@@ -475,9 +489,8 @@ export default function MachineHistoryPage() {
               setTestFilter('');
               setSearch('');
             }}
-            disabled={!companyFilter}
           >
-            <option value="">{companyFilter ? 'Seleccione maquina' : 'Primero seleccione empresa'}</option>
+            <option value="">Seleccione máquina</option>
             {machineOptions.map((machine) => (
               <option key={machine.id} value={machine.id}>
                 {machine.label}{machine.code ? ` · ${machine.code}` : ''}
@@ -487,9 +500,9 @@ export default function MachineHistoryPage() {
         </label>
         <label>
           Punto de medición
-          <select value={pointFilter} onChange={(event) => setPointFilter(event.target.value)} disabled={!machineFilter || !pointOptions.length}>
-            <option value="">{pointOptions.length ? 'Todos los puntos' : 'Sin puntos con resultados'}</option>
-            {pointOptions.map((point) => <option key={point.id} value={point.id}>{point.label}</option>)}
+          <select value={pointFilter} onChange={(event) => selectPoint(event.target.value)} disabled={!pointOptions.length}>
+            <option value="">{pointOptions.length ? 'Seleccione un punto (opcional)' : 'Sin puntos disponibles'}</option>
+            {pointOptions.map((point) => <option key={point.id} value={point.id}>{point.label} · {point.machineLabel}</option>)}
           </select>
         </label>
         <label>
@@ -525,8 +538,8 @@ export default function MachineHistoryPage() {
 
       {!canShowHistory ? (
         <section className="panel emptyState">
-          <h2>Seleccione empresa y maquina</h2>
-          <p>El historico se calcula solo para una maquina concreta.</p>
+          <h2>Seleccione un punto o una máquina</h2>
+          <p>Al elegir un punto de medición, su máquina se selecciona automáticamente.</p>
         </section>
       ) : null}
 
@@ -539,7 +552,7 @@ export default function MachineHistoryPage() {
           </div>
           <div className="contextChips">
             <strong>{selectedMachine?.nombre || selectedMachine?.codigo_equipo || ''}</strong>
-            {pointFilter ? <em>{pointOptions.find((point) => point.id === pointFilter)?.label}</em> : null}
+            {selectedPoint ? <em>{selectedPoint.label}</em> : null}
             <span>{trendSeries.length} serie{trendSeries.length === 1 ? '' : 's'}</span>
           </div>
         </div>

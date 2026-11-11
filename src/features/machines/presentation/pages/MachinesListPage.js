@@ -131,6 +131,9 @@ export default function MachinesPage() {
           subtitle="Administre los equipos registrados y consulte su información técnica e historial."
           actions={
             <>
+              <button type="button" className="go-ghost" onClick={() => router.push('/machines/historico')}>
+                <BarChart3 size={16} /> Explorar histórico
+              </button>
               <OverflowMenu
                 items={[
                   { label: 'Histórico de máquinas', icon: BarChart3, onClick: () => router.push('/machines/historico') },
